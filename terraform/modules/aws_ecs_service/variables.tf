@@ -46,3 +46,7 @@ variable "cpu" {
 variable "image_url" {
   type = string
 }
+
+variable "security_groups" {
+  type = list(string)
+}

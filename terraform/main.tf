@@ -3,7 +3,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "5.54.1"
+      version = "5.95.0"
     }
   }
 
@@ -16,6 +16,7 @@ terraform {
 
 provider "aws" {
   region = "eu-west-2"
+  profile = "admin"
 }
 
 // Fetches a list of currently available availability zones
@@ -25,12 +26,18 @@ data "aws_availability_zones" "available" {
 }
 
 locals {
-  ecs_cluster_name = "my-cluster"
-  ecs_service_name = "my-ecs-service"
+  ecs = {
+    cluster_name = "my-ecs-cluster"
+    service_name = "my-ecs-service"
+    task_definition_name = "my-ecs-task-definition"
+    container_name = "my-ecs-container"
+  }
+  alb = {
+    name = "my-application-load-balancer"
+    target_group_name = "my-alb-target-group"
+  }
   availability_zone_a = data.aws_availability_zones.available.names[0]
   availability_zone_b = data.aws_availability_zones.available.names[1]
-  container_name = "my-container"
-  task_definition_name = "my-task-definition"
 }
 
 module "aws_vpc" {
@@ -51,6 +58,14 @@ module "private_subnet" {
   internet_gateway_id = module.aws_internet_gateway.id
 }
 
+module "private_subnet_nacl" {
+  source = "./modules/aws_network_acl"
+  vpc_id = module.aws_vpc.id
+  subnet_id = [module.private_subnet.id]
+  inbound_rules = []
+  outbound_rules = [] 
+}
+
 module "public_subnet" {
   source = "./modules/aws_subnet"
   availability_zone = local.availability_zone_b
@@ -59,18 +74,33 @@ module "public_subnet" {
   internet_gateway_id = module.aws_internet_gateway.id
 }
 
+module "public_subnet_nacl" {
+  source = "./modules/aws_network_acl"
+  vpc_id = module.aws_vpc.id
+  subnet_id = [module.public_subnet.id]
+  inbound_rules = []
+  outbound_rules = [] 
+}
+
 module "ecs_cluster" {
   source = "./modules/aws_ecs_cluster"
-  cluster_name = local.ecs_cluster_name
+  cluster_name = local.ecs.cluster_name
+}
+
+module "aws_lb_security_group" {
+  source = "./modules/aws_security_group"
 }
 
 module "aws_lb" {
   source = "./modules/aws_lb"
+  name = local.alb.name
+  subnets = [module.public_subnet.id]
+  security_groups = [module.aws_lb_target_group.id]
 }
 
 module "aws_lb_target_group" {
   source = "./modules/aws_lb_target_group"
-  name   = "ecs-target-group"
+  name   = local.alb.target_group_name
   port   = "80"
   protocol = "HTTP"
   vpc_id = module.aws_vpc.id
@@ -82,6 +112,11 @@ module "aws_lb_listener" {
   port = "80"
   protocol = "HTTP"
   target_group_arn = module.aws_lb_target_group.arn
+
+  // Normally, we would want to use an SSL/TLS certificate to encrypt HTTP traffic 
+  // between the client and load balancer. However, to obtain a certificate, you must
+  // provide proof of ownership of a domain name, which we don't have. Therefore, we 
+  // are using (unencrypted) HTTP instead.
   certificate_arn = null
 }
 
@@ -92,7 +127,11 @@ module "aws_lb_listener_rule" {
   target_group_arn = module.aws_lb_target_group.arn
 }
 
-module "ecs_service" {
+module "aws_ecs_service_security_group" {
+  source = "./modules/aws_security_group"
+}
+
+module "aws_ecs_service" {
   source = "./modules/aws_ecs_service"
   name = local.ecs_service_name
   cluster_id = module.ecs_cluster.id
@@ -106,4 +145,23 @@ module "ecs_service" {
   container_name = local.container_name
   task_definition_name = local.task_definition_name
   load_balancer_target_group_arn = module.aws_lb_target_group.arn
+  security_groups = [module.aws_ecs_service_security_group.id]
+}
+
+module "aws_appautoscaling_ecs" {
+  source = "./modules/aws_appautoscaling_ecs"
+  max_capacity = 5
+  min_capacity = 1
+  ecs_cluster_name = module.aws_ecs_cluster.name 
+  ecs_service_name = module.aws_ecs_service.name
+  target_tracking_scaling_policies = [
+    {
+      metric_type = "ECSServiceAverageMemoryUtilization"
+      target_value = 80
+    },
+    {
+      metric_type = "ECSServiceAverageCPUUtilization"
+      target_value = 60
+    }
+  ]
 }
