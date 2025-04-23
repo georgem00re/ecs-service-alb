@@ -29,16 +29,14 @@ data "aws_availability_zones" "available" {
 
 locals {
   ecs = {
-    cluster_name                = "my-ecs-cluster"
-    service_name                = "my-ecs-service"
-    task_definition_name        = "my-ecs-task-definition"
-    container_name              = "my-ecs-container"
-    service_security_group_name = "my-ecs-service-security-group"
+    cluster_name         = "my-ecs-cluster"
+    service_name         = "my-ecs-service"
+    task_definition_name = "my-ecs-task-definition"
+    container_name       = "my-ecs-container"
   }
   alb = {
-    name                = "my-application-load-balancer"
-    target_group_name   = "my-alb-target-group"
-    security_group_name = "my-alb-security-group"
+    name              = "my-application-load-balancer"
+    target_group_name = "my-alb-target-group"
   }
   availability_zone_a = data.aws_availability_zones.available.names[0]
   availability_zone_b = data.aws_availability_zones.available.names[1]
@@ -62,14 +60,6 @@ module "private_subnet" {
   internet_gateway_id = module.aws_internet_gateway.id
 }
 
-module "private_subnet_nacl" {
-  source         = "./modules/aws_network_acl"
-  vpc_id         = module.aws_vpc.id
-  subnet_ids     = [module.private_subnet.id]
-  inbound_rules  = []
-  outbound_rules = []
-}
-
 module "public_subnet" {
   source              = "./modules/aws_subnet"
   availability_zone   = local.availability_zone_b
@@ -78,32 +68,16 @@ module "public_subnet" {
   internet_gateway_id = module.aws_internet_gateway.id
 }
 
-module "public_subnet_nacl" {
-  source         = "./modules/aws_network_acl"
-  vpc_id         = module.aws_vpc.id
-  subnet_ids     = [module.public_subnet.id]
-  inbound_rules  = []
-  outbound_rules = []
-}
-
 module "aws_ecs_cluster" {
   source       = "./modules/aws_ecs_cluster"
   cluster_name = local.ecs.cluster_name
-}
-
-module "aws_lb_security_group" {
-  source         = "./modules/aws_security_group"
-  name           = local.alb.security_group_name
-  vpc_id         = module.aws_vpc.id
-  inbound_rules  = []
-  outbound_rules = []
 }
 
 module "aws_lb" {
   source          = "./modules/aws_lb"
   name            = local.alb.name
   subnets         = [module.public_subnet.id]
-  security_groups = [module.aws_lb_target_group.id]
+  security_groups = []
 }
 
 module "aws_lb_target_group" {
@@ -135,14 +109,6 @@ module "aws_lb_listener_rule" {
   target_group_arn = module.aws_lb_target_group.arn
 }
 
-module "aws_ecs_service_security_group" {
-  source         = "./modules/aws_security_group"
-  vpc_id         = module.aws_vpc.id
-  inbound_rules  = []
-  outbound_rules = []
-  name           = local.ecs.service_security_group_name
-}
-
 module "aws_ecs_service" {
   source                         = "./modules/aws_ecs_service"
   name                           = local.ecs.service_name
@@ -150,14 +116,14 @@ module "aws_ecs_service" {
   desired_count                  = 1
   memory                         = 2048
   cpu                            = 1024
-  image_url                      = "nginx:latest"
+  image_url                      = "nginxdemos/hello"
   container_port                 = 80
   host_port                      = 80
   subnets                        = [module.private_subnet.id]
   container_name                 = local.ecs.container_name
   task_definition_name           = local.ecs.task_definition_name
   load_balancer_target_group_arn = module.aws_lb_target_group.arn
-  security_groups                = [module.aws_ecs_service_security_group.id]
+  security_groups                = []
 }
 
 module "aws_appautoscaling_ecs" {
