@@ -18,7 +18,7 @@ terraform {
 
 provider "aws" {
   region  = "eu-west-2"
-  profile = "personal"
+  profile = "admin"
 }
 
 // Fetches a list of currently available availability zones
