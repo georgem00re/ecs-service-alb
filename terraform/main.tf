@@ -49,15 +49,14 @@ module "aws_internet_gateway" {
 }
 
 module "private_subnet" {
-  source              = "./modules/aws_subnet"
-  availability_zone   = local.availability_zone_a
-  cidr_block          = "192.0.0.0/24" // 192.0.0.0 – 192.0.0.255
-  vpc_id              = module.aws_vpc.id
-  internet_gateway_id = module.aws_internet_gateway.id
+  source            = "./modules/aws_private_subnet"
+  availability_zone = local.availability_zone_a
+  cidr_block        = "192.0.0.0/24" // 192.0.0.0 – 192.0.0.255
+  vpc_id            = module.aws_vpc.id
 }
 
 module "public_subnet_1" {
-  source              = "./modules/aws_subnet"
+  source              = "./modules/aws_public_subnet"
   availability_zone   = local.availability_zone_a
   cidr_block          = "192.0.1.0/25" // 192.0.1.0 - 192.0.1.127 (128 addresses).
   vpc_id              = module.aws_vpc.id
@@ -68,7 +67,7 @@ module "public_subnet_1" {
 // availability zones. This ensures high availability. If one availability zone (subnet) experiences an outage,
 // the load balancer will continue to operate in the remaining availability zone (subnet).
 module "public_subnet_2" {
-  source              = "./modules/aws_subnet"
+  source              = "./modules/aws_public_subnet"
   availability_zone   = local.availability_zone_b
   cidr_block          = "192.0.1.128/25" // 192.0.1.128 - 192.0.1.255 (128 addresses).
   vpc_id              = module.aws_vpc.id
