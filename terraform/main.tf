@@ -34,10 +34,6 @@ locals {
     task_definition_name = "my-ecs-task-definition"
     container_name       = "my-ecs-container"
   }
-  alb = {
-    name              = "my-application-load-balancer"
-    target_group_name = "my-alb-target-group"
-  }
   availability_zone_a = data.aws_availability_zones.available.names[0]
   availability_zone_b = data.aws_availability_zones.available.names[1]
 }
@@ -86,14 +82,32 @@ module "aws_ecs_cluster" {
 
 module "aws_lb" {
   source          = "./modules/aws_lb"
-  name            = local.alb.name
   subnets         = [module.public_subnet_1.id, module.public_subnet_2.id]
-  security_groups = []
+  security_groups = [module.aws_lb_security_group.id]
+}
+
+module "aws_lb_security_group" {
+  source = "./modules/aws_security_group"
+  vpc_id = module.aws_vpc.id
+
+  // This allows all inbound HTTP traffic from the public Internet.
+  inbound_rules = [{
+    cidr_ipv4   = "0.0.0.0/0"
+    from_port   = 80
+    ip_protocol = "tcp"
+    to_port     = 80
+  }]
+  // This allows outbound HTTP traffic to the security group of the ECS service.
+  outbound_rules = [{
+    security_group_id = module.aws_ecs_service_security_group.id
+    from_port         = 80
+    ip_protocol       = "tcp"
+    to_port           = 80
+  }]
 }
 
 module "aws_lb_target_group" {
   source   = "./modules/aws_lb_target_group"
-  name     = local.alb.target_group_name
   port     = "80"
   protocol = "HTTP"
   vpc_id   = module.aws_vpc.id
@@ -134,8 +148,29 @@ module "aws_ecs_service" {
   container_name                 = local.ecs.container_name
   task_definition_name           = local.ecs.task_definition_name
   load_balancer_target_group_arn = module.aws_lb_target_group.arn
-  security_groups                = []
+  security_groups                = [module.aws_ecs_service_security_group.id]
   depends_on                     = [module.aws_lb_listener_rule, module.aws_lb_target_group, module.aws_lb]
+}
+
+module "aws_ecs_service_security_group" {
+  source = "./modules/aws_security_group"
+  vpc_id = module.aws_vpc.id
+
+  // This allows inbound HTTP traffic from the security group of the ALB.
+  inbound_rules = [{
+    security_group_id = module.aws_lb_security_group.id
+    from_port         = 80
+    ip_protocol       = "tcp"
+    to_port           = 80
+  }]
+
+  // This allows outbound HTTP traffic to the security group of the ECS service.
+  outbound_rules = [{
+    security_group_id = module.aws_ecs_service_security_group.id
+    from_port         = 80
+    ip_protocol       = "tcp"
+    to_port           = 80
+  }]
 }
 
 module "aws_appautoscaling_ecs" {
