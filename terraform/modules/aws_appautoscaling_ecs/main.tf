@@ -1,14 +1,18 @@
 
 resource "aws_appautoscaling_target" "this" {
-  max_capacity = var.max_capacity
-  min_capacity = var.min_capacity
-  resource_id = "service/${var.ecs_cluster_name}/${var.ecs_service_name}"
+  max_capacity       = var.max_capacity
+  min_capacity       = var.min_capacity
+  resource_id        = "service/${var.ecs_cluster_name}/${var.ecs_service_name}"
   scalable_dimension = "ecs:service:DesiredCount"
-  service_namespace = "ecs"
+  service_namespace  = "ecs"
 }
 
 resource "aws_appautoscaling_policy" "this" {
-  for_each = var.scaling_policies
+  for_each = {
+    for index, target_tracking_scaling_policy in var.target_tracking_scaling_policies :
+    index => target_tracking_scaling_policy
+  }
+
   name               = "${each.value.metric_type}-${each.key}"
   policy_type        = "TargetTrackingScaling"
   resource_id        = aws_appautoscaling_target.this.resource_id

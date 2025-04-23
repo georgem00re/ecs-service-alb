@@ -17,7 +17,7 @@ variable "ecs_service_name" {
 
 variable "target_tracking_scaling_policies" {
   type = list(object({
-    metric_type = string
+    metric_type  = string
     target_value = number
   }))
 }
