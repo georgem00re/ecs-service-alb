@@ -60,10 +60,21 @@ module "private_subnet" {
   internet_gateway_id = module.aws_internet_gateway.id
 }
 
-module "public_subnet" {
+module "public_subnet_1" {
+  source              = "./modules/aws_subnet"
+  availability_zone   = local.availability_zone_a
+  cidr_block          = "192.0.1.0/25" // 192.0.1.0 - 192.0.1.127 (128 addresses).
+  vpc_id              = module.aws_vpc.id
+  internet_gateway_id = module.aws_internet_gateway.id
+}
+
+// We must create two public subnets because an ALB must be deployed across at least two subnets in two different
+// availability zones. This ensures high availability. If one availability zone (subnet) experiences an outage,
+// the load balancer will continue to operate in the remaining availability zone (subnet).
+module "public_subnet_2" {
   source              = "./modules/aws_subnet"
   availability_zone   = local.availability_zone_b
-  cidr_block          = "192.0.1.0/24" // 192.0.1.0 – 192.0.1.255
+  cidr_block          = "192.0.1.128/25" // 192.0.1.128 - 192.0.1.255 (128 addresses).
   vpc_id              = module.aws_vpc.id
   internet_gateway_id = module.aws_internet_gateway.id
 }
@@ -76,7 +87,7 @@ module "aws_ecs_cluster" {
 module "aws_lb" {
   source          = "./modules/aws_lb"
   name            = local.alb.name
-  subnets         = [module.public_subnet.id]
+  subnets         = [module.public_subnet_1.id, module.public_subnet_2.id]
   security_groups = []
 }
 
@@ -124,6 +135,7 @@ module "aws_ecs_service" {
   task_definition_name           = local.ecs.task_definition_name
   load_balancer_target_group_arn = module.aws_lb_target_group.arn
   security_groups                = []
+  depends_on                     = [module.aws_lb_listener_rule, module.aws_lb_target_group, module.aws_lb]
 }
 
 module "aws_appautoscaling_ecs" {
