@@ -13,3 +13,9 @@ resource "aws_route_table_association" "elb_b" {
   subnet_id      = aws_subnet.this.id
   route_table_id = aws_route_table.this.id
 }
+
+resource "aws_route" "this" {
+  route_table_id         = aws_route_table.this.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = var.nat_gateway_id
+}

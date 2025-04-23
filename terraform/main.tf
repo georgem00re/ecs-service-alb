@@ -48,11 +48,25 @@ module "aws_internet_gateway" {
   vpc_id = module.aws_vpc.id
 }
 
+// A NAT gateway is needed to allow the private subnet outbound internet connectivity
+// so that it can pull the "nginxdemos/hello" image from DockerHub.
+module "aws_nat_gateway" {
+  source = "./modules/aws_nat_gateway"
+
+  // The NAT gateway exists in a single specific AZ and serves only private subnets in the same AZ.
+  // Therefore, it must be deployed in AZ-A (or public subnet 1).
+  subnet_id = module.public_subnet_1.id
+
+  # To ensure proper ordering, it is recommended to add an explicit dependency on the VPC's internet gateway.
+  depends_on = [module.aws_internet_gateway]
+}
+
 module "private_subnet" {
   source            = "./modules/aws_private_subnet"
   availability_zone = local.availability_zone_a
   cidr_block        = "192.0.0.0/24" // 192.0.0.0 – 192.0.0.255
   vpc_id            = module.aws_vpc.id
+  nat_gateway_id    = module.aws_nat_gateway.id
 }
 
 module "public_subnet_1" {

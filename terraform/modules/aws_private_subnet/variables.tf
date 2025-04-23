@@ -10,3 +10,7 @@ variable "cidr_block" {
 variable "availability_zone" {
   type = string
 }
+
+variable "nat_gateway_id" {
+  type = string
+}
