@@ -36,11 +36,20 @@ locals {
   }
   availability_zone_a = data.aws_availability_zones.available.names[0]
   availability_zone_b = data.aws_availability_zones.available.names[1]
+
+  cidr = {
+    vpc             = "192.0.0.0/16"   // 192.0.0.0 to 192.0.255.255
+    private_subnet  = "192.0.0.0/24"   // 192.0.0.0 – 192.0.0.255
+    public_subnets  = "192.0.1.0/24"   // 192.0.1.0 - 192.0.1.255 (256 addresses).
+    public_subnet_1 = "192.0.1.0/25"   // 192.0.1.0 - 192.0.1.127 (128 addresses).
+    public_subnet_2 = "192.0.1.128/25" // 192.0.1.128 - 192.0.1.255 (128 addresses).
+    public_internet = "0.0.0.0/0"
+  }
 }
 
 module "aws_vpc" {
   source     = "./modules/aws_vpc"
-  cidr_block = "192.0.0.0/16" // 192.0.0.0 to 192.0.255.255
+  cidr_block = local.cidr.vpc
 }
 
 module "aws_internet_gateway" {
@@ -64,7 +73,7 @@ module "aws_nat_gateway" {
 module "private_subnet" {
   source            = "./modules/aws_private_subnet"
   availability_zone = local.availability_zone_a
-  cidr_block        = "192.0.0.0/24" // 192.0.0.0 – 192.0.0.255
+  cidr_block        = local.cidr.private_subnet
   vpc_id            = module.aws_vpc.id
   nat_gateway_id    = module.aws_nat_gateway.id
 }
@@ -72,7 +81,7 @@ module "private_subnet" {
 module "public_subnet_1" {
   source              = "./modules/aws_public_subnet"
   availability_zone   = local.availability_zone_a
-  cidr_block          = "192.0.1.0/25" // 192.0.1.0 - 192.0.1.127 (128 addresses).
+  cidr_block          = local.cidr.public_subnet_1
   vpc_id              = module.aws_vpc.id
   internet_gateway_id = module.aws_internet_gateway.id
 }
@@ -83,9 +92,52 @@ module "public_subnet_1" {
 module "public_subnet_2" {
   source              = "./modules/aws_public_subnet"
   availability_zone   = local.availability_zone_b
-  cidr_block          = "192.0.1.128/25" // 192.0.1.128 - 192.0.1.255 (128 addresses).
+  cidr_block          = local.cidr.public_subnet_2
   vpc_id              = module.aws_vpc.id
   internet_gateway_id = module.aws_internet_gateway.id
+}
+
+module "private_subnet_nacl" {
+  source     = "./modules/aws_network_acl"
+  subnet_ids = [module.private_subnet.id]
+  vpc_id     = module.aws_vpc.id
+
+  inbound_rules = [
+    { // Allow HTTP traffic from the ALB in the public subnets.
+      rule_number   = 100
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.public_subnets
+      from_port     = "80"
+      to_port       = "80"
+    },
+    { // Allow return traffic from the public Internet.
+      rule_number   = 110
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.public_internet
+      from_port     = "1024"
+      to_port       = "65535"
+    },
+  ]
+  outbound_rules = [
+    { // Allow return traffic to the ALB in the public subnets.
+      rule_number   = 120
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.public_subnets
+      from_port     = "1024"
+      to_port       = "65535"
+    },
+    { // Allow HTTPS traffic to the public Internet.
+      rule_number   = 130
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.public_internet
+      from_port     = "443"
+      to_port       = "443"
+    },
+  ]
 }
 
 module "aws_ecs_cluster" {
@@ -105,7 +157,7 @@ module "aws_lb_security_group" {
 
   // This allows all inbound HTTP traffic from the public Internet.
   inbound_rules = [{
-    cidr_ipv4   = "0.0.0.0/0"
+    cidr_ipv4   = local.cidr.public_internet
     from_port   = 80
     ip_protocol = "tcp"
     to_port     = 80
@@ -180,7 +232,7 @@ module "aws_ecs_service_security_group" {
   // This allows outbound HTTPS traffic to the Internet, enabling the ECS service
   // to pull the "nginxdemos/hello" image from DockerHub.
   outbound_rules = [{
-    cidr_ipv4   = "0.0.0.0/0"
+    cidr_ipv4   = local.cidr.public_internet
     from_port   = 443
     ip_protocol = "tcp"
     to_port     = 443
