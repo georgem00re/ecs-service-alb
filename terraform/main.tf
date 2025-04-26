@@ -177,12 +177,13 @@ module "aws_ecs_service_security_group" {
     to_port           = 80
   }]
 
-  // This allows outbound HTTP traffic to the security group of the ECS service.
+  // This allows outbound HTTPS traffic to the Internet, enabling the ECS service
+  // to pull the "nginxdemos/hello" image from DockerHub.
   outbound_rules = [{
-    security_group_id = module.aws_ecs_service_security_group.id
-    from_port         = 80
-    ip_protocol       = "tcp"
-    to_port           = 80
+    cidr_ipv4   = "0.0.0.0/0"
+    from_port   = 443
+    ip_protocol = "tcp"
+    to_port     = 443
   }]
 }
 
