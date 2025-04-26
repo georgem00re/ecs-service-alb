@@ -38,12 +38,13 @@ locals {
   availability_zone_b = data.aws_availability_zones.available.names[1]
 
   cidr = {
-    vpc             = "192.0.0.0/16"   // 192.0.0.0 to 192.0.255.255
-    private_subnet  = "192.0.0.0/24"   // 192.0.0.0 – 192.0.0.255
+    public_internet = "0.0.0.0/0"
+    vpc             = "192.0.0.0/16"   // 192.0.0.0 to 192.0.255.255 (65,636 addresses).
+    private_subnet  = "192.0.0.0/24"   // 192.0.0.0 – 192.0.0.255 (256 addresses).
     public_subnets  = "192.0.1.0/24"   // 192.0.1.0 - 192.0.1.255 (256 addresses).
     public_subnet_1 = "192.0.1.0/25"   // 192.0.1.0 - 192.0.1.127 (128 addresses).
-    public_subnet_2 = "192.0.1.128/25" // 192.0.1.128 - 192.0.1.255 (128 addresses).
-    public_internet = "0.0.0.0/0"
+    public_subnet_2 = "192.0.1.128/26" // 192.0.1.128 - 192.0.1.191 (64 addresses).
+    public_subnet_3 = "192.0.1.192/26" // 192.0.1.192 - 192.0.1.255 (64 addresses).
   }
 }
 
@@ -55,19 +56,6 @@ module "aws_vpc" {
 module "aws_internet_gateway" {
   source = "./modules/aws_internet_gateway"
   vpc_id = module.aws_vpc.id
-}
-
-// A NAT gateway is needed to allow the private subnet outbound internet connectivity
-// so that it can pull the "nginxdemos/hello" image from DockerHub.
-module "aws_nat_gateway" {
-  source = "./modules/aws_nat_gateway"
-
-  // The NAT gateway exists in a single specific AZ and serves only private subnets in the same AZ.
-  // Therefore, it must be deployed in AZ-A (or public subnet 1).
-  subnet_id = module.public_subnet_1.id
-
-  # To ensure proper ordering, it is recommended to add an explicit dependency on the VPC's internet gateway.
-  depends_on = [module.aws_internet_gateway]
 }
 
 module "private_subnet" {
@@ -87,8 +75,8 @@ module "public_subnet_1" {
 }
 
 // We must create two public subnets because an ALB must be deployed across at least two subnets in two different
-// availability zones. This ensures high availability. If one availability zone (subnet) experiences an outage,
-// the load balancer will continue to operate in the remaining availability zone (subnet).
+// availability zones. This ensures high availability. If one availability zone (or subnet) experiences an outage,
+// the load balancer will continue to operate using the remaining availability zone.
 module "public_subnet_2" {
   source              = "./modules/aws_public_subnet"
   availability_zone   = local.availability_zone_b
@@ -97,7 +85,74 @@ module "public_subnet_2" {
   internet_gateway_id = module.aws_internet_gateway.id
 }
 
-module "private_subnet_nacl" {
+// We are creating a third public subnet to hold the VPC's NAT gateway.
+module "public_subnet_3" {
+  source              = "./modules/aws_public_subnet"
+  cidr_block          = local.cidr.public_subnet_3
+  vpc_id              = module.aws_vpc.id
+  internet_gateway_id = module.aws_internet_gateway.id
+
+  // A NAT gateway is deployed in a single availability zone, and serves only private subnets in the same availability
+  // zone. Therefore, our NAT gateway must be deployed in the same availability zone as the private subnet (i.e. AZ-A).
+  availability_zone = local.availability_zone_a
+}
+
+// A NAT gateway is needed to allow the private subnet outbound internet connectivity so that it can pull the
+// "nginxdemos/hello" image from DockerHub. We do not apply a NACL to this subnet. It is generally recommended to avoid
+// applying restrictive NACL rules to the subnet containing your NAT gateway. NAT gateways are inherently secure, and
+// overly restrictive NACL rules can interfere with their proper function.
+module "aws_nat_gateway" {
+  source    = "./modules/aws_nat_gateway"
+  subnet_id = module.public_subnet_3.id
+
+  # To ensure proper ordering, it is recommended to add an explicit dependency on the VPC's internet gateway.
+  depends_on = [module.aws_internet_gateway]
+}
+
+module "alb_subnet_nacl" {
+  source     = "./modules/aws_network_acl"
+  subnet_ids = [module.public_subnet_1.id, module.public_subnet_2.id]
+  vpc_id     = module.aws_vpc.id
+
+  inbound_rules = [
+    { // Allow HTTP traffic from the Internet.
+      rule_number   = 100
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.public_internet
+      from_port     = "80"
+      to_port       = "80"
+    },
+    { // Allow return traffic from the ECS service in the private subnet.
+      rule_number   = 110
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.private_subnet
+      from_port     = "1024"
+      to_port       = "65535"
+    },
+  ]
+  outbound_rules = [
+    { // Allow HTTP return traffic to the public Internet.
+      rule_number   = 130
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.public_internet
+      from_port     = "1024"
+      to_port       = "65535"
+    },
+    { // Allow HTTP traffic to the ECS service in the private subnet.
+      rule_number   = 140
+      protocol      = "tcp"
+      allow_or_deny = "allow"
+      cidr_block    = local.cidr.private_subnet
+      from_port     = "80"
+      to_port       = "80"
+    },
+  ]
+}
+
+module "ecs_subnet_nacl" {
   source     = "./modules/aws_network_acl"
   subnet_ids = [module.private_subnet.id]
   vpc_id     = module.aws_vpc.id
